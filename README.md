@@ -2,6 +2,7 @@
 
 シラバス2024のキーワードから生成AIで作成した問題を生成AIで生成したhtmlファイルに詰め込んだモノです。
 
+quiz.htmlをダウンロードして、ローカルでブラウザから開くだけ！
 
 "Comprehension Check Test for DL4E" - Corresponding to Syllabus 2024
 
