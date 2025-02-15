@@ -18,9 +18,14 @@
     // 不正解や「わからない」と回答した問題の記録
     let wrongQuestions = [];
     let startTime = 0; // クイズ開始時刻
+    // 試験時間モード用の実際の回答数カウント
+    let attemptedCount = 0;
+    // 履歴表示用のグローバル変数
+    let historyCurrentPage = 1;
+    let historyOrder = "desc"; // "asc" または "desc"
 
     document.addEventListener("DOMContentLoaded", () => {
-      // HTML内に埋め込んだJSONデータを取得
+      // JSONデータ取得
       const jsonData = document.getElementById("question-data").textContent;
       try {
         const parsedData = JSON.parse(jsonData);
@@ -30,7 +35,7 @@
         document.getElementById("mode-selection").innerHTML = "問題データの読み込みに失敗しました。";
       }
       
-      // JSONデータからユニークなカテゴリを抽出してチェックボックスを生成
+      // カテゴリの抽出とチェックボックス生成
       const categorySet = new Set();
       questions.forEach(q => {
         if (q.category) {
@@ -38,14 +43,32 @@
         }
       });
       const categorySelectionDiv = document.getElementById("category-selection");
-      // チェックボックス領域を初期化
       categorySelectionDiv.innerHTML = "<h3>出題対象のカテゴリを選択してください</h3>";
+
+      // 「すべて選択」と「リセット」ボタンの追加
+      const selectAllButton = document.createElement("button");
+      selectAllButton.textContent = "すべて選択";
+      selectAllButton.addEventListener("click", function() {
+        document.querySelectorAll('input[name="category"]').forEach(cb => cb.checked = true);
+      });
+      categorySelectionDiv.appendChild(selectAllButton);
+
+      const resetButton = document.createElement("button");
+      resetButton.textContent = "リセット";
+      resetButton.addEventListener("click", function() {
+        document.querySelectorAll('input[name="category"]').forEach(cb => cb.checked = false);
+      });
+      categorySelectionDiv.appendChild(resetButton);
+      categorySelectionDiv.appendChild(document.createElement("br"));
+
+      // 各カテゴリチェックボックス（初期はチェック済み）
       categorySet.forEach(category => {
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.name = "category";
         checkbox.value = category;
-        // 英数字以外を除去してIDを生成
+        checkbox.checked = true;
+        // ID作成
         checkbox.id = "cat-" + category.replace(/\W/g, '');
         const label = document.createElement("label");
         label.htmlFor = checkbox.id;
@@ -55,6 +78,24 @@
         categorySelectionDiv.appendChild(document.createElement("br"));
       });
 
+      // 履歴表示エリアの初期化
+      updateHistory();
+      
+      // 「履歴をクリア」ボタンの設定
+      const clearHistoryBtn = document.getElementById("clear-history");
+      clearHistoryBtn.addEventListener("click", () => {
+        localStorage.removeItem("quizHistory");
+        historyCurrentPage = 1;
+        updateHistory();
+      });
+      
+      // 並び順選択のイベント設定
+      document.getElementById("order-select").addEventListener("change", function() {
+        historyOrder = this.value;
+        historyCurrentPage = 1;
+        updateHistory();
+      });
+      
       // JSON読み込み後、モード選択画面を表示
       document.getElementById("mode-selection").style.display = "block";
     });
@@ -69,22 +110,16 @@
       document.getElementById("time-mode").style.display = "block";
     }
 
-    // 出題数モード開始（「全問」の場合は 'all'）
+    // 出題数モード開始（'all'の場合は全問題）
     function startQuizCount(count) {
       quizMode = "count";
       wrongQuestions = [];
-      // 選択されたカテゴリで問題をフィルタリング
       const selectedCategories = Array.from(document.querySelectorAll('input[name="category"]:checked')).map(cb => cb.value);
       let filteredQuestions = selectedCategories.length 
         ? questions.filter(q => selectedCategories.includes(q.category))
         : questions;
       availableQuestions = filteredQuestions;
-      if (count === 'all') {
-        numQuestions = filteredQuestions.length;
-      } else {
-        numQuestions = count;
-      }
-      // クイズ開始時刻を記録
+      numQuestions = (count === 'all') ? filteredQuestions.length : count;
       startTime = Date.now();
       quiz = filteredQuestions.sort(() => 0.5 - Math.random()).slice(0, numQuestions);
       currentQuestion = 0;
@@ -98,14 +133,13 @@
     function startQuizTime(minutes) {
       quizMode = "time";
       wrongQuestions = [];
-      // 選択されたカテゴリで問題をフィルタリング
+      attemptedCount = 0;  // カウント初期化
       const selectedCategories = Array.from(document.querySelectorAll('input[name="category"]:checked')).map(cb => cb.value);
       let filteredQuestions = selectedCategories.length 
         ? questions.filter(q => selectedCategories.includes(q.category))
         : questions;
       availableQuestions = filteredQuestions;
-      examTime = minutes * 60; // 秒に変換
-      // クイズ開始時刻を記録
+      examTime = minutes * 60; // 秒へ変換
       startTime = Date.now();
       quiz = filteredQuestions.sort(() => 0.5 - Math.random());
       currentQuestion = 0;
@@ -119,26 +153,25 @@
       showQuestion();
     }
 
-    // 問題表示（自動的に「E: わからない」を追加）
+    // 問題表示（「E: わからない」を追加）
     function showQuestion() {
-      // 試験時間モード：時間切れなら結果表示
       if (quizMode === "time" && Date.now() >= examEndTime) {
         clearTimeout(examTimer);
         showResultsTime();
         return;
       }
-      // 出題数モード：全問終了なら結果表示
       if (quizMode === "count" && currentQuestion >= numQuestions) {
         showResults();
         return;
       }
-      // 試験時間モード：問題が尽きたら再シャッフル（フィルタ済みの問題から再抽出）
       if (quizMode === "time" && currentQuestion >= quiz.length) {
         quiz = availableQuestions.sort(() => 0.5 - Math.random());
         currentQuestion = 0;
       }
       let questionObj = quiz[currentQuestion];
-      document.getElementById("question").textContent = (currentQuestion + 1) + ". " + questionObj.question;
+      // 試験時間モードでは attemptedCount を表示用の番号とする
+      let displayNum = (quizMode === "time") ? (attemptedCount + 1) : (currentQuestion + 1);
+      document.getElementById("question").textContent = displayNum + ". " + questionObj.question;
       let options = "";
       for (let key in questionObj.options) {
         options += `<button onclick="handleAnswer('${key}')">${key}: ${questionObj.options[key]}</button><br>`;
@@ -174,9 +207,11 @@
         : "次へ進む";
       resultText += `<br><button onclick="nextQuestion()">${nextButtonLabel}</button>`;
       document.getElementById("answer-result").innerHTML = resultText;
-      // 選択肢ボタンを無効化
-      let optionButtons = document.querySelectorAll("#options button");
-      optionButtons.forEach(btn => btn.disabled = true);
+      // 試験時間モードの場合、解答済み数をカウント
+      if (quizMode === "time") {
+        attemptedCount++;
+      }
+      document.querySelectorAll("#options button").forEach(btn => btn.disabled = true);
     }
 
     // 次の問題へ進む
@@ -198,31 +233,51 @@
       }
     }
 
-    // 結果表示（出題数モード）
+    // 出題数モード終了時の結果表示と履歴保存
     function showResults() {
       document.getElementById("quiz-container").style.display = "none";
       document.getElementById("result-screen").style.display = "block";
       let percentage = ((score / numQuestions) * 100).toFixed(2);
-      // 経過時間の計算
       let elapsedTime = Date.now() - startTime;
-      let seconds = Math.floor(elapsedTime / 1000);
-      let minutes = Math.floor(seconds / 60);
-      seconds = seconds % 60;
-      document.getElementById("score").textContent = `正解数: ${score} / ${numQuestions} (正解率: ${percentage}%)  所要時間: ${minutes}分${seconds}秒`;
+      let seconds = Math.floor(elapsedTime / 1000) % 60;
+      let minutes = Math.floor(elapsedTime / 1000 / 60);
+      document.getElementById("score").textContent = `正解数: ${score} / ${numQuestions} (正答率: ${percentage}%)  所要時間: ${minutes}分${seconds}秒`;
+      
+      let result = {
+        date: new Date().toLocaleString(),
+        isoTimestamp: new Date().toISOString(),
+        mode: "出題数モード",
+        score: score,
+        total: numQuestions,
+        percentage: percentage,
+        time: `${minutes}分${seconds}秒`
+      };
+      saveResult(result);
+      updateHistory();
       showReview();
     }
 
-    // 結果表示（試験時間モード）
+    // 試験時間モード終了時の結果表示と履歴保存
     function showResultsTime() {
       document.getElementById("quiz-container").style.display = "none";
       document.getElementById("result-screen").style.display = "block";
-      let attempted = currentQuestion;
-      let percentage = attempted > 0 ? ((score / attempted) * 100).toFixed(2) : "0";
+      let percentage = attemptedCount > 0 ? ((score / attemptedCount) * 100).toFixed(2) : "0";
       let elapsedTime = Date.now() - startTime;
-      let seconds = Math.floor(elapsedTime / 1000);
-      let minutes = Math.floor(seconds / 60);
-      seconds = seconds % 60;
-      document.getElementById("score").textContent = `試験時間内に解答した問題数: ${attempted} 問中 ${score} 問正解 (正解率: ${percentage}%)  所要時間: ${minutes}分${seconds}秒`;
+      let seconds = Math.floor(elapsedTime / 1000) % 60;
+      let minutes = Math.floor(elapsedTime / 1000 / 60);
+      document.getElementById("score").textContent = `試験時間内に解答した問題数: ${attemptedCount} 問中 ${score} 問正解 (正答率: ${percentage}%)  所要時間: ${minutes}分${seconds}秒`;
+      
+      let result = {
+        date: new Date().toLocaleString(),
+        isoTimestamp: new Date().toISOString(),
+        mode: "試験時間モード",
+        score: score,
+        total: attemptedCount,
+        percentage: percentage,
+        time: `${minutes}分${seconds}秒`
+      };
+      saveResult(result);
+      updateHistory();
       showReview();
     }
 
@@ -250,6 +305,62 @@
       document.getElementById("review").innerHTML = reviewText;
     }
 
+    // localStorageに結果を保存（isoTimestamp追加）
+    function saveResult(result) {
+      let history = JSON.parse(localStorage.getItem("quizHistory")) || [];
+      history.push(result);
+      localStorage.setItem("quizHistory", JSON.stringify(history));
+    }
+
+    // 履歴のページングおよび並び順選択付き表示（日時は isoTimestamp で処理）
+    function updateHistory() {
+      let history = JSON.parse(localStorage.getItem("quizHistory")) || [];
+      // isoTimestamp を Date 型として比較
+      if (historyOrder === "asc") {
+        history.sort((a, b) => new Date(a.isoTimestamp) - new Date(b.isoTimestamp));
+      } else {
+        history.sort((a, b) => new Date(b.isoTimestamp) - new Date(a.isoTimestamp));
+      }
+      const itemsPerPage = 10;
+      const totalPages = Math.ceil(history.length / itemsPerPage) || 1;
+      if (historyCurrentPage > totalPages) historyCurrentPage = totalPages;
+      if (historyCurrentPage < 1) historyCurrentPage = 1;
+      const startIndex = (historyCurrentPage - 1) * itemsPerPage;
+      const currentItems = history.slice(startIndex, startIndex + itemsPerPage);
+      let html = "";
+      if (history.length === 0) {
+        html = "<p>履歴はありません</p>";
+      } else {
+        html = "<table border='1' cellspacing='0' cellpadding='5'><tr><th>日時</th><th>モード</th><th>正解数</th><th>問題数</th><th>正答率</th><th>所要時間</th></tr>";
+        currentItems.forEach(item => {
+          html += `<tr>
+                    <td>${item.date}</td>
+                    <td>${item.mode}</td>
+                    <td>${item.score}</td>
+                    <td>${item.total}</td>
+                    <td>${item.percentage}%</td>
+                    <td>${item.time}</td>
+                  </tr>`;
+        });
+        html += "</table>";
+        html += `<div style="margin-top: 5px;">ページ ${historyCurrentPage} / ${totalPages} `;
+        if (historyCurrentPage > 1) {
+          html += `<button onclick="changeHistoryPage(-1)">前へ</button> `;
+        }
+        if (historyCurrentPage < totalPages) {
+          html += `<button onclick="changeHistoryPage(1)">次へ</button>`;
+        }
+        html += `</div>`;
+      }
+      document.getElementById("history-list").innerHTML = html;
+    }
+
+    // 履歴ページの移動
+    function changeHistoryPage(delta) {
+      historyCurrentPage += delta;
+      updateHistory();
+    }
+
     // リセット：結果画面からモード選択へ戻る
     function resetQuiz() {
       if (quizMode === "time") {
@@ -265,7 +376,7 @@
   </script>
 </head>
 <body>
-  <!-- JSONデータ（各問題に category 属性を追加） -->
+  <!-- JSONデータ（各問題にcategory属性を追加） -->
   <script id="question-data" type="application/json">
 [
     {
@@ -6815,10 +6926,23 @@
   <div id="mode-selection" style="display:none;">
     <h2>モードを選択してください</h2>
     <div id="category-selection">
-      <!-- JSONから生成されたチェックボックスがここに挿入されます -->
+      <!-- チェックボックスとボタンがここに生成されます -->
     </div>
     <button onclick="showCountMode()">出題数モード</button>
     <button onclick="showTimeMode()">試験時間モード</button>
+    <!-- 結果履歴表示エリア -->
+    <div id="history-section" style="margin-top: 20px;">
+      <h3>結果履歴</h3>
+      <div>
+        <label for="order-select">並び順:</label>
+        <select id="order-select">
+          <option value="desc" selected>降順</option>
+          <option value="asc">昇順</option>
+        </select>
+      </div>
+      <div id="history-list"></div>
+      <button id="clear-history">履歴をクリア</button>
+    </div>
   </div>
 
   <!-- 出題数モードの選択肢 -->
