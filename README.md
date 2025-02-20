@@ -4,6 +4,8 @@
 
 quiz.htmlをダウンロードして、ローカルでブラウザから開くだけ！
 
+経緯はこちら⇒ https://www.ecomottblog.com/?p=15883
+
 "Comprehension Check Test for DL4E" - Corresponding to Syllabus 2024
 
 How to use: Simply open quiz.html in your browser.
